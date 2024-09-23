@@ -12,7 +12,7 @@ class Objective3 @Inject constructor(injector: HasAndroidInjector) : Objective(i
     @Inject lateinit var activePlugin: ActivePlugin
 
     init {
-        tasks.add(MinimumDurationTask(this, T.days(0).msecs(5000)))
+        tasks.add(MinimumDurationTask(this, T.secs(10).msecs()))
         tasks.add(
             object : Task(this, R.string.objectives_manualenacts) {
                 override fun isCompleted(): Boolean {

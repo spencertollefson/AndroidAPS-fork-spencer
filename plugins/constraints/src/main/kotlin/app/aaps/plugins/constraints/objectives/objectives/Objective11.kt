@@ -8,7 +8,7 @@ class Objective11(injector: HasAndroidInjector) : Objective(injector, "dyn_isf",
 
     init {
         tasks.add(
-            MinimumDurationTask(this, T.days(0).msecs(5000))
+            MinimumDurationTask(this, T.secs(10).msecs())
                 .learned(Learned(R.string.objectives_dyn_isf_learned))
         )
     }
