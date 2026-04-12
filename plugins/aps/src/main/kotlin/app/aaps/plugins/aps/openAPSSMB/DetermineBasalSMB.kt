@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSSMB
 
+import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.AutosensResult
@@ -10,8 +11,13 @@ import app.aaps.core.interfaces.aps.MealData
 import app.aaps.core.interfaces.aps.OapsProfile
 import app.aaps.core.interfaces.aps.Predictions
 import app.aaps.core.interfaces.aps.RT
+import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.DoubleKey
+import app.aaps.core.keys.IntKey
+import app.aaps.core.keys.interfaces.Preferences
 import java.text.DecimalFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -26,7 +32,9 @@ import kotlin.math.roundToInt
 @Singleton
 class DetermineBasalSMB @Inject constructor(
     private val profileUtil: ProfileUtil,
-    private val fabricPrivacy: FabricPrivacy
+    private val fabricPrivacy: FabricPrivacy,
+    private val preferences: Preferences,
+    private val profileFunction: ProfileFunction
 ) {
 
     private val consoleError = mutableListOf<String>()
@@ -108,6 +116,25 @@ class DetermineBasalSMB @Inject constructor(
         consoleError.add(msg)
     }
 
+    // mod ketoacidosis protection
+    private fun ketoProtection(_proposedRate: Double, profile: OapsProfile, rT: RT): Double {
+        var proposedRate : Double = _proposedRate
+        val protectionRate : Double = profile.ketoacidosis_protection_basal.toDouble() * 0.01
+        val cutOff : Double = round_basal(profile.current_basal * protectionRate)
+        if (profile.ketoacidosis_protection && proposedRate < cutOff) {
+            if (profile.ketoacidosis_protection_var_strategy && profile.ketoacidosis_protection_iob < (0 - profile.current_basal) ) {
+                proposedRate = cutOff
+                rT.reason.append("\nKetoacidosis protection sets temp basal to " + round(proposedRate,2) +" U/h.")
+                consoleError.add("Ketoacidosis protection sets temp basal to " + round(proposedRate,2) + "fsteps U/h")
+            } else if (!profile.ketoacidosis_protection_var_strategy) {
+                proposedRate = cutOff
+                rT.reason.append("\nKetoacidosis protection sets temp basal to " + round(proposedRate,2) + " U/h")
+                consoleError.add("Ketoacidosis protection sets temp basal to  " + round(proposedRate,2) + " U/h")
+            }
+        }
+        return proposedRate
+    }
+
     private fun getMaxSafeBasal(profile: OapsProfile): Double =
         min(profile.max_basal, min(profile.max_daily_safety_multiplier * profile.max_daily_basal, profile.current_basal_safety_multiplier * profile.current_basal))
 
@@ -144,7 +171,7 @@ class DetermineBasalSMB @Inject constructor(
             }
         } else {
             rT.duration = duration
-            rT.rate = suggestedRate
+            rT.rate = ketoProtection(suggestedRate, profile, rT)
             return rT
         }
     }
@@ -202,7 +229,7 @@ class DetermineBasalSMB @Inject constructor(
                 rT.reason.append(". Shortening " + currenttemp.duration + "m long zero temp to 30m. ")
                 rT.deliverAt = deliverAt
                 rT.duration = 30
-                rT.rate = 0.0
+                rT.rate = ketoProtection(0.0, profile, rT)
                 return rT
             } else { //do nothing.
                 rT.reason.append(". Temp ${currenttemp.rate} <= current basal ${round(basal, 2)}U/hr; doing nothing. ")
@@ -218,11 +245,77 @@ class DetermineBasalSMB @Inject constructor(
         var min_bg = profile.min_bg
         var max_bg = profile.max_bg
 
+        // Activity detection (steps)
+        consoleError.add("----------------------------------")
+        consoleError.add("Activity detection: ")
+        consoleError.add("----------------------------------")
+
+        val activityDetection = profile.activity_detection
+        var stepActivityDetected = false
+        var stepInactivityDetected = false
+        var activityRatio = 1.0
+        val recentSteps5Minutes = profile.recent_steps_5_minutes ?: 0
+        val recentSteps10Minutes = profile.recent_steps_10_minutes ?: 0
+        val recentSteps15Minutes = profile.recent_steps_15_minutes ?: 0
+        val recentSteps30Minutes = profile.recent_steps_30_minutes ?: 0
+        val recentSteps60Minutes = profile.recent_steps_60_minutes ?: 0
+        val phoneMoved = profile.phone_moved ?: false
+        val now = profile.now ?: 0
+        val timeSinceStart = profile.time_since_start ?: 0
+        val ignore_inactivity_overnight = preferences.get(BooleanKey.ActivityMonitorOvernight)
+        val inactivity_idle_start =  preferences.get(IntKey.ActivityMonitorIdleStart)
+        val inactivity_idle_end = preferences.get(IntKey.ActivityMonitorIdleEnd)
+        val activity_scale_factor = preferences.get(DoubleKey.ActivityScaleFactor)
+        val inactivity_scale_factor = preferences.get(DoubleKey.InactivityScaleFactor)
+
+        if ( !activityDetection!!) {
+            consoleError.add("Activity detection disabled in the settings. ")
+        } else if ( profile.temptargetSet) {
+            consoleError.add("Activity detection disabled: tempTarget. ")
+        } else if (!phoneMoved) {
+            consoleError.add("Activity detection disabled: Phone seems not to be carried for the last 15 m. ")
+        } else {
+            consoleError.add("0-5 m ago: $recentSteps5Minutes steps; ")
+            consoleError.add("5-10 m ago: $recentSteps10Minutes steps; ")
+            consoleError.add("10-15 m ago: $recentSteps15Minutes steps; ")
+            consoleError.add("Last 30 m: $recentSteps30Minutes steps; ")
+            consoleError.add("Last 60 m: $recentSteps60Minutes steps; ")
+            if ( timeSinceStart < 60 && recentSteps60Minutes <= 200 ) {
+                consoleError.add("Activity monitor initialising for "+(60-timeSinceStart)+" more minutes: inactivity detection disabled")
+            } else if ( ( inactivity_idle_start > inactivity_idle_end && ( now >= inactivity_idle_start || now < inactivity_idle_end ) )  // includes midnight
+                || ( now >= inactivity_idle_start && now < inactivity_idle_end)                                                         // excludes midnight
+                && recentSteps60Minutes <= 200 && ignore_inactivity_overnight )  {
+                consoleError.add("Activity monitor disabled inactivity detection: sleeping hours")
+            } else if ( recentSteps5Minutes > 300 || recentSteps10Minutes > 300  || recentSteps15Minutes > 300  || recentSteps30Minutes > 1500 || recentSteps60Minutes > 2500 ) {
+                stepActivityDetected = true
+                activityRatio = 1 - 0.3 * activity_scale_factor
+                consoleError.add("-> Activity monitor detected activity, activity ratio: $activityRatio")
+            } else if ( recentSteps5Minutes > 200 || recentSteps10Minutes > 200  || recentSteps15Minutes > 200
+                || recentSteps30Minutes > 500 || recentSteps60Minutes > 800 ) {
+                stepActivityDetected = true
+                activityRatio = 1 - 0.15 * activity_scale_factor
+                consoleError.add("-> Activity monitor detected partial activity, activity ratio: $activityRatio")
+            } else if ( bg < target_bg && recentSteps60Minutes <= 200 ) {
+                consoleError.add("Activity monitor disabled inactivity detection: : bg < target")
+            } else if ( recentSteps60Minutes < 50 ) {
+                stepInactivityDetected = true
+                activityRatio =  1 + 0.2 * inactivity_scale_factor
+                consoleError.add("-> Activity monitor detected inactivity, activity ratio: $activityRatio")
+            } else if ( recentSteps60Minutes <= 200 ) {
+                stepInactivityDetected = true
+                activityRatio =  1 + 0.1 * inactivity_scale_factor
+                consoleError.add("-> Activity monitor detected partial inactivity, activity ratio: $activityRatio")
+            } else {
+                consoleError.add("-> Activity monitor detected neutral state, activity ratio unchanged: $activityRatio")
+            }
+        }
+        consoleError.add("----------------------------------")
+
         var sensitivityRatio: Double
         val high_temptarget_raises_sensitivity = profile.exercise_mode || profile.high_temptarget_raises_sensitivity
         val normalTarget = Constants.NORMAL_TARGET_MGDL // evaluate high/low temptarget against normal target, not scheduled target (which might change)
         // when temptarget is 160 mg/dL, run 50% basal (120 = 75%; 140 = 60%),  80 mg/dL with low_temptarget_lowers_sensitivity would give 1.5x basal, but is limited to autosens_max (1.2x by default)
-        val halfBasalTarget = profile.half_basal_exercise_target
+        val mgdlHalfBasalTarget = profile.half_basal_exercise_target * if (profileFunction.getUnits() == GlucoseUnit.MMOL) GlucoseUnit.MMOLL_TO_MGDL else 1.0
 
         if (dynIsfMode) {
             consoleError.add("---------------------------------------------------------")
@@ -236,22 +329,28 @@ class DetermineBasalSMB @Inject constructor(
             // w/ target 100, temp target 110 = .89, 120 = 0.8, 140 = 0.67, 160 = .57, and 200 = .44
             // e.g.: Sensitivity ratio set to 0.8 based on temp target of 120; Adjusting basal from 1.65 to 1.35; ISF from 58.9 to 73.6
             //sensitivityRatio = 2/(2+(target_bg-normalTarget)/40);
-            val c = (halfBasalTarget - normalTarget).toDouble()
+            val c = (mgdlHalfBasalTarget - normalTarget).toDouble()
             sensitivityRatio = c / (c + target_bg - normalTarget)
             // limit sensitivityRatio to profile.autosens_max (1.2x by default)
-            sensitivityRatio = min(sensitivityRatio, profile.autosens_max)
+            // mod limit to 1.3 max
+            val sensitivityRatioLimit = min(1.3, profile.autosens_max)
+            sensitivityRatio = min(sensitivityRatio, sensitivityRatioLimit) // min(sensitivityRatio, profile.autosens_max)
             sensitivityRatio = round(sensitivityRatio, 2)
-            consoleLog.add("Sensitivity ratio set to $sensitivityRatio based on temp target of $target_bg; ")
+            consoleError.add("Sensitivity ratio set to $sensitivityRatio based on temp target of $target_bg; ")
         } else {
-            sensitivityRatio = autosens_data.ratio
-            consoleLog.add("Autosens ratio: $sensitivityRatio; ")
+            sensitivityRatio = autosens_data.ratio * activityRatio
+            if (!stepActivityDetected && !stepInactivityDetected) {
+                consoleError.add("Sensitivity ratio set to $sensitivityRatio based on autosens; ")
+            } else {
+                consoleError.add("Sensitivity ratio set to $sensitivityRatio based on autosens (" + autosens_data.ratio + ") and activity monitor (" + activityRatio + "); ")
+            }
         }
         basal = profile.current_basal * sensitivityRatio
         basal = round_basal(basal)
         if (basal != profile_current_basal)
-            consoleLog.add("Adjusting basal from $profile_current_basal to $basal; ")
+            consoleError.add("Adjusting basal from $profile_current_basal to $basal; ")
         else
-            consoleLog.add("Basal unchanged: $basal; ")
+            consoleError.add("Basal unchanged: $basal; ")
 
         // adjust min, max, and target BG for sensitivity, such that 50% increase in ISF raises target from 100 to 120
         if (profile.temptargetSet) {
@@ -854,6 +953,15 @@ class DetermineBasalSMB @Inject constructor(
             enableSMB = false
         }
 
+        // mod no smb if bg < threshold
+        val mgdlSmbThreshold = profile.thresholdSMB * if (profileFunction.getUnits() == GlucoseUnit.MMOL) GlucoseUnit.MMOLL_TO_MGDL else 1.0
+        if (enableSMB && bg < mgdlSmbThreshold) {
+            consoleError.add("BG < ${convert_bg(profile.thresholdSMB)} - disabling SMB")
+            rT.reason.append("BG < ${convert_bg(profile.thresholdSMB)} - disabling SMB")
+            enableSMB = false
+        }
+        // end mod
+
         consoleError.add("BG projected to remain above ${convert_bg(min_bg)} for $minutesAboveMinBG minutes")
         if (minutesAboveThreshold < 240 || minutesAboveMinBG < 60) {
             consoleError.add("BG projected to remain above ${convert_bg(threshold)} for $minutesAboveThreshold minutes")
@@ -875,7 +983,10 @@ class DetermineBasalSMB @Inject constructor(
         }
 
         // don't low glucose suspend if IOB is already super negative and BG is rising faster than predicted
-        if (bg < threshold && iob_data.iob < -profile.current_basal * 20 / 60 && minDelta > 0 && minDelta > expectedDelta) {
+        // mod adjustment of the conditions for low glucose suspend
+        // if (bg < threshold && iob_data.iob < -profile.current_basal * 20 / 60 && minDelta > 0 && minDelta > expectedDelta) {
+        if (bg < threshold && iob_data.iob < -profile.current_basal && minDelta > 0 && minDelta > 2 * expectedDelta) {
+        // end mod
             rT.reason.append("IOB ${iob_data.iob} < ${round(-profile.current_basal * 20 / 60, 2)}")
             rT.reason.append(" and minDelta ${convert_bg(minDelta)} > expectedDelta ${convert_bg(expectedDelta)}; ")
             // predictive low glucose suspend mode: BG is / is projected to be < threshold
@@ -1117,7 +1228,7 @@ class DetermineBasalSMB @Inject constructor(
 
                 // if no zero temp is required, don't return yet; allow later code to set a high temp
                 if (durationReq > 0) {
-                    rT.rate = smbLowTempReq
+                    rT.rate = ketoProtection(smbLowTempReq, profile, rT)
                     rT.duration = durationReq
                     return rT
                 }

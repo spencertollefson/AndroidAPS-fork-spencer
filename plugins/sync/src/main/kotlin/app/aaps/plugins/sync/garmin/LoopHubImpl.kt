@@ -1,11 +1,13 @@
 package app.aaps.plugins.sync.garmin
 
 import androidx.annotation.VisibleForTesting
+import app.aaps.core.data.iob.InMemoryGlucoseValue
 import app.aaps.core.data.model.GV
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.HR
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TE
+import app.aaps.core.data.model.TT
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
@@ -22,14 +24,17 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.queue.CommandQueue
+import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.extensions.convertedToPercent
+import app.aaps.plugins.sync.garmin.keys.GarminBooleanKey
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import java.time.Clock
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -48,7 +53,8 @@ class LoopHubImpl @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val userEntryLogger: UserEntryLogger,
     private val preferences: Preferences,
-    private val processedTbrEbData: ProcessedTbrEbData
+    private val processedTbrEbData: ProcessedTbrEbData,
+    private val dateUtil: DateUtil
 ) : LoopHub {
 
     val disposable = CompositeDisposable()
@@ -130,9 +136,25 @@ class LoopHubImpl @Inject constructor(
     }
 
     /** Retrieves the glucose values starting at from. */
-    override fun getGlucoseValues(from: Instant, ascending: Boolean): List<GV> {
+    /*override fun getGlucoseValues(from: Instant, ascending: Boolean): List<GV> {
         return persistenceLayer.getBgReadingsDataFromTime(from.toEpochMilli(), ascending)
             .blockingGet()
+    }*/
+    override fun getGlucoseValues(from: Instant, ascending: Boolean): List<GV> {
+        if (!preferences.get(GarminBooleanKey.GarminSendSmoothedData)) {
+            return persistenceLayer.getBgReadingsDataFromTime(from.toEpochMilli(), ascending)
+                    .blockingGet()
+        } else {
+            val glucose: List<GV>
+            glucose = persistenceLayer.getBgReadingsDataFromTime(from.toEpochMilli(), ascending)
+                .blockingGet()
+            for (i in 0 until 2) {
+                iobCobCalculator.ads.bucketedData?.get(i)?.let {
+                    glucose[i].value = it.recalculated
+                }
+            }
+            return glucose
+        }
     }
 
     /** Notifies the system that carbs were eaten and stores the value. */
@@ -152,6 +174,54 @@ class LoopHubImpl @Inject constructor(
         }
         commandQueue.bolus(detailedBolusInfo, null)
     }
+
+    // mod Bolus and temp target
+    /** Triggers a bolus. */
+    override fun postBolus(bolus: Double) {
+        aapsLogger.info(LTag.GARMIN, "trigger a bolus of $bolus U")
+        userEntryLogger.log(
+            action = Action.BOLUS,
+            source = Sources.Garmin,
+            note = null,
+            ValueWithUnit.Insulin(bolus)
+        )
+        val detailedBolusInfo = DetailedBolusInfo().apply {
+            eventType = TE.Type.SNACK_BOLUS
+            insulin = bolus
+        }
+        commandQueue.bolus(detailedBolusInfo, null)
+    }
+
+    override fun postTempTarget(target: Double, duration: Int) {
+        if (target == 0.0 || duration == 0) {
+            disposable += persistenceLayer.cancelCurrentTemporaryTargetIfAny(
+                timestamp = dateUtil.now(),
+                action = Action.TT,
+                source = Sources.TTDialog,
+                note = null,
+                listValues = listOf()
+            ).subscribe()
+        } else {
+            disposable += persistenceLayer.insertAndCancelCurrentTemporaryTarget(
+                temporaryTarget = TT(
+                    timestamp = dateUtil.now(),
+                    duration = TimeUnit.MINUTES.toMillis(duration.toLong()),
+                    reason = TT.Reason.WEAR,
+                    lowTarget = profileUtil.convertToMgdl(target, profileUtil.units),
+                    highTarget = profileUtil.convertToMgdl(target, profileUtil.units)
+                ),
+                action = Action.TT,
+                source = Sources.Garmin,
+                note = null,
+                listValues = listOf(
+                    ValueWithUnit.TETTReason(TT.Reason.AUTOMATION),
+                    ValueWithUnit.Mgdl(target),
+                    ValueWithUnit.Minute(duration)
+                ).filterNotNull()
+            ).subscribe()
+        }
+    }
+    // end mod
 
     /** Stores hear rate readings that a taken and averaged of the given interval. */
     override fun storeHeartRate(

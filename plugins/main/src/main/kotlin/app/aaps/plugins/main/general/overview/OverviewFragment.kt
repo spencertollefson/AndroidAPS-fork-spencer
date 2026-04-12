@@ -120,6 +120,7 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Provider
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 
 class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickListener {
@@ -260,6 +261,21 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         binding.buttonsLayout.quickWizardButton.setOnLongClickListener(this)
         binding.infoLayout.apsMode.setOnClickListener(this)
         binding.infoLayout.apsMode.setOnLongClickListener(this)
+
+        // Mod exercise mode toggle icon
+        binding.exerciseModeCheckboxIcon.setOnClickListener {
+            if (preferences.get(BooleanKey.ApsAutoIsfHighTtRaisesSens)) {
+                binding.exerciseModeCheckboxIcon.setImageResource(app.aaps.core.objects.R.drawable.ic_cp_activity_inactive)
+                binding.exerciseModeCheckboxIcon.setBackgroundColor(rh.gac(context, app.aaps.core.ui.R.attr.ribbonDefaultColor))
+                preferences.put(BooleanKey.ApsAutoIsfHighTtRaisesSens, false)
+            } else {
+                binding.exerciseModeCheckboxIcon.setImageResource(app.aaps.core.objects.R.drawable.ic_cp_activity_active)
+                binding.exerciseModeCheckboxIcon.setBackgroundColor(rh.gac(context, app.aaps.core.ui.R.attr.ribbonWarningColor))
+                preferences.put(BooleanKey.ApsAutoIsfHighTtRaisesSens, true)
+            }
+        }
+        // End mod
+
     }
 
     override fun onPause() {
@@ -368,6 +384,16 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         handler.post { refreshAll() }
         updatePumpStatus()
         updateCalcProgress()
+
+        // Mod check color of exercise mode toggle icon
+        if (preferences.get(BooleanKey.ApsAutoIsfHighTtRaisesSens)) {
+            binding.exerciseModeCheckboxIcon.setImageResource(app.aaps.core.objects.R.drawable.ic_cp_activity_active)
+            binding.exerciseModeCheckboxIcon.setBackgroundColor(rh.gac(context, app.aaps.core.ui.R.attr.ribbonWarningColor))
+        } else {
+            binding.exerciseModeCheckboxIcon.setImageResource(app.aaps.core.objects.R.drawable.ic_cp_activity_inactive)
+            binding.exerciseModeCheckboxIcon.setBackgroundColor(rh.gac(context, app.aaps.core.ui.R.attr.ribbonDefaultColor))
+        }
+        // End mod
 
         popupBolusDialogIfRunning(onClick = false)
     }
@@ -537,8 +563,10 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
 
             R.id.temp_target         -> v.performClick()
             R.id.active_profile      -> activity?.let { activity ->
-                if (loop.runningMode == RM.Mode.DISCONNECTED_PUMP) OKDialog.show(activity, rh.gs(R.string.not_available_full), rh.gs(R.string.smscommunicator_pump_disconnected))
-                else
+                // mod allow profile switch if loop ist disconnected
+                //if (loop.runningMode == RM.Mode.DISCONNECTED_PUMP) OKDialog.show(activity, rh.gs(R.string.not_available_full), rh.gs(R.string.smscommunicator_pump_disconnected))
+                // else
+                // mod end
                     protectionCheck.queryProtection(
                         activity,
                         ProtectionCheck.Protection.BOLUS,
@@ -716,6 +744,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                         apsModeSetA11yLabel(app.aaps.core.ui.R.string.superbolus)
                         binding.infoLayout.apsModeText.text = dateUtil.age(loop.minutesToEndOfSuspend() * 60000L, true, rh)
                         binding.infoLayout.apsModeText.visibility = View.VISIBLE
+                        binding.infoLayout.version.visibility = View.GONE
                     }
 
                     RM.Mode.DISCONNECTED_PUMP -> {
@@ -723,6 +752,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                         apsModeSetA11yLabel(app.aaps.core.ui.R.string.disconnected)
                         binding.infoLayout.apsModeText.text = dateUtil.age(loop.minutesToEndOfSuspend() * 60000L, true, rh)
                         binding.infoLayout.apsModeText.visibility = View.VISIBLE
+                        binding.infoLayout.version.visibility = View.GONE
                     }
 
                     RM.Mode.SUSPENDED_BY_PUMP -> {
@@ -737,6 +767,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                         apsModeSetA11yLabel(app.aaps.core.ui.R.string.loopsuspended)
                         binding.infoLayout.apsModeText.text = dateUtil.age(loop.minutesToEndOfSuspend() * 60000L, true, rh)
                         binding.infoLayout.apsModeText.visibility = View.VISIBLE
+                        binding.infoLayout.version.visibility = View.GONE
                     }
 
                     RM.Mode.SUSPENDED_BY_DST  -> {
@@ -750,24 +781,28 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                         binding.infoLayout.apsMode.setImageResource(app.aaps.core.ui.R.drawable.ic_loop_lgs)
                         apsModeSetA11yLabel(app.aaps.core.ui.R.string.uel_lgs_loop_mode)
                         binding.infoLayout.apsModeText.visibility = View.GONE
+                        binding.infoLayout.version.visibility = View.VISIBLE
                     }
 
                     RM.Mode.CLOSED_LOOP       -> {
                         binding.infoLayout.apsMode.setImageResource(app.aaps.core.objects.R.drawable.ic_loop_closed)
                         apsModeSetA11yLabel(app.aaps.core.ui.R.string.closedloop)
                         binding.infoLayout.apsModeText.visibility = View.GONE
+                        binding.infoLayout.version.visibility = View.VISIBLE
                     }
 
                     RM.Mode.OPEN_LOOP         -> {
                         binding.infoLayout.apsMode.setImageResource(app.aaps.core.ui.R.drawable.ic_loop_open)
                         apsModeSetA11yLabel(app.aaps.core.ui.R.string.openloop)
                         binding.infoLayout.apsModeText.visibility = View.GONE
+                        binding.infoLayout.version.visibility = View.VISIBLE
                     }
 
                     RM.Mode.DISABLED_LOOP     -> {
                         binding.infoLayout.apsMode.setImageResource(app.aaps.core.ui.R.drawable.ic_loop_disabled)
                         apsModeSetA11yLabel(R.string.disabled_loop)
                         binding.infoLayout.apsModeText.visibility = View.GONE
+                        binding.infoLayout.version.visibility = View.VISIBLE
                     }
 
                     RM.Mode.RESUME            -> error("Invalid mode")
@@ -789,6 +824,10 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             // Uploader status from ns
             binding.uploader.text = processedDeviceStatusData.uploaderStatusSpanned
             binding.uploader.setOnClickListener { activity?.let { OKDialog.show(it, rh.gs(R.string.uploader), processedDeviceStatusData.extendedUploaderStatus) } }
+
+            // AISF status from ns
+            binding.aisfdebug.text = processedDeviceStatusData.aisfStatus
+            binding.aisfdebug.setOnClickListener { activity?.let { OKDialog.show(it, rh.gs(R.string.aisfdebug), processedDeviceStatusData.extendedAisfStatus) } }
         }
     }
 
@@ -805,7 +844,8 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
 
                 val graph = GraphViewWithCleanup(requireContext())
                 graph.layoutParams =
-                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rh.dpToPx(skinProvider.activeSkin().secondaryGraphHeight)).also { it.setMargins(0, rh.dpToPx(15), 0, rh.dpToPx(10)) }
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rh.dpToPx(skinProvider.activeSkin().secondaryGraphHeight)).also { it.setMargins(0, rh.dpToPx(0), 0, rh.dpToPx(0)) }
+                    //LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rh.dpToPx(skinProvider.activeSkin().secondaryGraphHeight)).also { it.setMargins(0, rh.dpToPx(15), 0, rh.dpToPx(10)) }
                 graph.gridLabelRenderer?.gridColor = rh.gac(context, app.aaps.core.ui.R.attr.graphGrid)
                 graph.gridLabelRenderer?.reloadStyles()
                 graph.gridLabelRenderer?.isHorizontalLabelsVisible = false
@@ -815,7 +855,8 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                 relativeLayout.addView(graph)
 
                 val label = TextView(context)
-                val layoutParams = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(rh.dpToPx(30), rh.dpToPx(25), 0, 0) }
+                //val layoutParams = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(rh.dpToPx(30), rh.dpToPx(25), 0, 0) }
+                val layoutParams = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(rh.dpToPx(35), rh.dpToPx(5), 0, 0) }
                 layoutParams.addRule(RelativeLayout.ALIGN_PARENT_TOP)
                 layoutParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT)
                 label.layoutParams = layoutParams
@@ -882,7 +923,9 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             val outDate = (if (!isActualBg) rh.gs(R.string.a11y_bg_outdated) else "")
             binding.infoLayout.bg.contentDescription = rh.gs(R.string.a11y_blood_glucose) + " " + binding.infoLayout.bg.text.toString() + " " + lastBgDescription + " " + outDate
 
-            binding.infoLayout.timeAgo.text = dateUtil.minOrSecAgo(rh, lastBg?.timestamp)
+            // mod don't show annoying seconds
+            // binding.infoLayout.timeAgo.text = dateUtil.minOrSecAgo(rh, lastBg?.timestamp)
+            binding.infoLayout.timeAgo.text = dateUtil.minAgo(rh, lastBg?.timestamp)
             binding.infoLayout.timeAgo.contentDescription = dateUtil.minAgoLong(rh, lastBg?.timestamp)
             binding.infoLayout.timeAgoShort.text = dateUtil.minAgoShort(lastBg?.timestamp)
 
@@ -920,19 +963,21 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
                     else app.aaps.core.ui.R.attr.ribbonTextDefaultColor
                 } else app.aaps.core.ui.R.attr.ribbonTextDefaultColor
             } ?: app.aaps.core.ui.R.attr.ribbonTextDefaultColor
-            setRibbon(binding.activeProfile, profileTextColor, profileBackgroundColor, profileFunction.getProfileNameWithRemainingTime())
+            setRibbon(binding.activeProfile, profileTextColor, profileBackgroundColor, profileFunction.getProfileNameWithRemainingTime().replace("h ","h").replace("%)(","%|").replace("(", " \u00AD("))
         }
     }
 
     private fun updateTemporaryBasal() {
         val temporaryBasalText = overviewData.temporaryBasalText()
-        val temporaryBasalColor = overviewData.temporaryBasalColor(context)
+        // mod don't change basal color
+        // val temporaryBasalColor = overviewData.temporaryBasalColor(context)
         val temporaryBasalIcon = overviewData.temporaryBasalIcon()
         val temporaryBasalDialogText = overviewData.temporaryBasalDialogText()
         runOnUiThread {
             _binding ?: return@runOnUiThread
             binding.infoLayout.baseBasal.text = temporaryBasalText
-            binding.infoLayout.baseBasal.setTextColor(temporaryBasalColor)
+            // mod don't change basal color
+            // binding.infoLayout.baseBasal.setTextColor(temporaryBasalColor)
             binding.infoLayout.baseBasalIcon.setImageResource(temporaryBasalIcon)
             binding.infoLayout.basalLayout.setOnClickListener { activity?.let { OKDialog.show(it, rh.gs(app.aaps.core.ui.R.string.basal), temporaryBasalDialogText) } }
         }
@@ -1084,6 +1129,8 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             preferences.get(UnitDoubleKey.OverviewLowMark),
             preferences.get(UnitDoubleKey.OverviewHighMark)
         )
+        //val runningAutoIsf = activePlugin.activeAPS.algorithm.name == "AUTO_ISF"
+        //val masterAutoIsf = runningAutoIsf && !config.AAPSCLIENT
         graphData.addBgReadings(menuChartSettings[0][OverviewMenus.CharType.PRE.ordinal], context)
         graphData.addBucketedData()
         graphData.addTreatments(context)
@@ -1092,6 +1139,8 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             graphData.addTherapyEvents()
         if (menuChartSettings[0][OverviewMenus.CharType.ACT.ordinal])
             graphData.addActivity(0.8)
+        if (overviewMenus.isActiveCharTypeData(0,OverviewMenus.CharType.BG_PARAB.ordinal))
+            graphData.addBgParabola(menuChartSettings[0][OverviewMenus.CharType.PRE.ordinal],1.0)
         if ((pump.pumpDescription.isTempBasalCapable || config.AAPSCLIENT) && menuChartSettings[0][OverviewMenus.CharType.BAS.ordinal])
             graphData.addBasals()
         graphData.addTargetLine()
@@ -1114,6 +1163,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             var useABSForScale = false
             var useIobForScale = false
             var useCobForScale = false
+            var useIobThForScale = false
             var useDevForScale = false
             var useRatioForScale = false
             var useVarSensForScale = false
@@ -1121,34 +1171,101 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             var useBGIForScale = false
             var useHRForScale = false
             var useSTEPSForScale = false
+            var useFINAL_ISFForScale = false
+            var useACCE_ISFForScale = false
+            var useBG_ISFForScale = false
+            var usePP_ISFForScale = false
+            var useDURA_ISFForScale = false
             when {
-                menuChartSettings[g + 1][OverviewMenus.CharType.ABS.ordinal]      -> useABSForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.IOB.ordinal]      -> useIobForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.COB.ordinal]      -> useCobForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal]      -> useDevForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal]      -> useBGIForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.SEN.ordinal]      -> useRatioForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.VAR_SEN.ordinal]  -> useVarSensForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.DEVSLOPE.ordinal] -> useDSForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.HR.ordinal]       -> useHRForScale = true
-                menuChartSettings[g + 1][OverviewMenus.CharType.STEPS.ordinal]    -> useSTEPSForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ABS.ordinal)        -> useABSForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB.ordinal)        -> useIobForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.COB.ordinal)        -> useCobForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB_TH.ordinal)     -> useIobThForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DEV.ordinal)        -> useDevForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BGI.ordinal)        -> useBGIForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.SEN.ordinal)        -> useRatioForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.VAR_SEN.ordinal)    -> useVarSensForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DEVSLOPE.ordinal)   -> useDSForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.HR.ordinal)         -> useHRForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.STEPS.ordinal)      -> useSTEPSForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.FIN_ISF.ordinal)    -> useFINAL_ISFForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ACC_ISF.ordinal)    -> useACCE_ISFForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BG_ISF.ordinal)     -> useBG_ISFForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.PP_ISF.ordinal)     -> usePP_ISFForScale = true
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DUR_ISF.ordinal)    -> useDURA_ISFForScale = true
             }
-            val alignDevBgiScale = menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal] && menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal]
 
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.ABS.ordinal]) secondGraphData.addAbsIob(useABSForScale, 1.0)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.IOB.ordinal]) secondGraphData.addIob(useIobForScale, 1.0)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.COB.ordinal]) secondGraphData.addCob(useCobForScale, if (useCobForScale) 1.0 else 0.5)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal]) secondGraphData.addDeviations(useDevForScale, 1.0)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal]) secondGraphData.addMinusBGI(useBGIForScale, if (alignDevBgiScale) 1.0 else 0.8)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.SEN.ordinal]) secondGraphData.addRatio(useRatioForScale, if (useRatioForScale) 1.0 else 0.8)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.VAR_SEN.ordinal]) secondGraphData.addVarSens(useVarSensForScale, if (useVarSensForScale) 1.0 else 0.8)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.DEVSLOPE.ordinal] && config.isDev()) secondGraphData.addDeviationSlope(
-                useDSForScale,
-                if (useDSForScale) 1.0 else 0.8,
-                useRatioForScale
-            )
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.HR.ordinal]) secondGraphData.addHeartRate(useHRForScale, if (useHRForScale) 1.0 else 0.8)
-            if (menuChartSettings[g + 1][OverviewMenus.CharType.STEPS.ordinal]) secondGraphData.addSteps(useSTEPSForScale, if (useSTEPSForScale) 1.0 else 0.8)
+            val alignDevBgiScale = menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal] && menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal]
+            val alignAbsScale = menuChartSettings[g + 1][OverviewMenus.CharType.ABS.ordinal] && overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB_TH.ordinal)
+            val alignIobScale = menuChartSettings[g + 1][OverviewMenus.CharType.IOB.ordinal] && overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB_TH.ordinal)
+            val maxCommonIob = when {
+                alignAbsScale -> max(overviewData.maxIobValueFound, overviewData.maxIobThValueFound)
+                alignIobScale -> max(overviewData.maxIobValueFound, overviewData.maxIobThValueFound)
+                else          -> 0.0
+            }
+            var maxAutoIsfFactor = 1.0
+            var minAutoIsfFactor = 1.0
+            var commonIsfCount = 0
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.FIN_ISF.ordinal)) {
+                maxAutoIsfFactor = max(maxAutoIsfFactor, overviewData.maxFinalIsfValueFound)
+                //minAutoIsfFactor = min(minAutoIsfFactor, overviewData.minFinalIsfValueFound)
+                commonIsfCount++
+            }
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ACC_ISF.ordinal)) {
+                maxAutoIsfFactor = max(maxAutoIsfFactor, overviewData.maxAcceIsfValueFound)
+                //minAutoIsfFactor = min(minAutoIsfFactor, overviewData.minAcceIsfValueFound)
+                commonIsfCount++
+            }
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BG_ISF.ordinal)) {
+                maxAutoIsfFactor = max(maxAutoIsfFactor, overviewData.maxBgIsfValueFound)
+                //minAutoIsfFactor = min(minAutoIsfFactor, overviewData.minBgIsfValueFound)
+                commonIsfCount++
+            }
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.PP_ISF.ordinal)) {
+                maxAutoIsfFactor = max(maxAutoIsfFactor, overviewData.maxPpIsfValueFound)
+                //minAutoIsfFactor = min(minAutoIsfFactor, overviewData.minPpIsfValueFound)
+                commonIsfCount++
+            }
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DUR_ISF.ordinal)) {
+                maxAutoIsfFactor = max(maxAutoIsfFactor, overviewData.maxDuraIsfValueFound)
+                //minAutoIsfFactor = min(minAutoIsfFactor, overviewData.minDuraIsfValueFound)
+                commonIsfCount++
+            }
+            val useCommonISFForScale = commonIsfCount>1
+            //val maxYValueForScale = maxAutoIsfFactor    //max(maxAutoIsfFactor, 2.0 - minAutoIsfFactor)       // ensure Y=1 is in the center of the graph
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ABS.ordinal)) secondGraphData.addAbsIob(useABSForScale, 1.0, maxCommonIob)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB.ordinal)) secondGraphData.addIob(   useIobForScale,  1.0, maxCommonIob)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.COB.ordinal)) secondGraphData.addCob(useCobForScale, if (useCobForScale) 1.0 else 0.5)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB_TH.ordinal)) secondGraphData.addIobTh( useIobThForScale,   if (maxCommonIob>0.0) 1.0 else 0.8, maxCommonIob)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DEV.ordinal)) secondGraphData.addDeviations(useDevForScale, 1.0)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BGI.ordinal)) secondGraphData.addMinusBGI(useBGIForScale, if (alignDevBgiScale) 1.0 else 0.8)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.SEN.ordinal)) secondGraphData.addRatio(useRatioForScale, if (useRatioForScale) 1.0 else 0.8)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.VAR_SEN.ordinal)) secondGraphData.addVarSens(useVarSensForScale, if (useVarSensForScale) 1.0 else 0.8)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.FIN_ISF.ordinal)) secondGraphData.addFinalIsf(useFINAL_ISFForScale,  1.0, useCommonISFForScale, maxAutoIsfFactor)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ACC_ISF.ordinal)) secondGraphData.addAcceIsf(useACCE_ISFForScale, 1.0, useCommonISFForScale,maxAutoIsfFactor)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BG_ISF.ordinal)) secondGraphData.addBgIsf(useBG_ISFForScale, 1.0, useCommonISFForScale, maxAutoIsfFactor)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.PP_ISF.ordinal)) secondGraphData.addPpIsf(usePP_ISFForScale, 1.0, useCommonISFForScale, maxAutoIsfFactor)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DUR_ISF.ordinal)) secondGraphData.addDuraIsf(useDURA_ISFForScale, 1.0, useCommonISFForScale, maxAutoIsfFactor)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DEVSLOPE.ordinal)) secondGraphData.addDeviationSlope(useDSForScale,if (useDSForScale) 1.0 else 0.8, useRatioForScale)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.HR.ordinal)) secondGraphData.addHeartRate(useHRForScale, if (useHRForScale) 1.0 else 0.8)
+            if (overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.STEPS.ordinal)) secondGraphData.addSteps(useSTEPSForScale, if (useSTEPSForScale) 1.0 else 0.8)
+
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.ABS.ordinal]) secondGraphData.addAbsIob(useABSForScale, 1.0, maxCommonIob)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.IOB.ordinal]) secondGraphData.addIob(   useIobForScale,  1.0, maxCommonIob)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.COB.ordinal]) secondGraphData.addCob(useCobForScale, if (useCobForScale) 1.0 else 0.5)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.IOB_TH.ordinal] && masterAutoIsf) secondGraphData.addIobTh( useIobThForScale,   if (maxCommonIob>0.0) 1.0 else 0.8, maxCommonIob)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal]) secondGraphData.addDeviations(useDevForScale, 1.0)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal]) secondGraphData.addMinusBGI(useBGIForScale, if (alignDevBgiScale) 1.0 else 0.8)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.SEN.ordinal]) secondGraphData.addRatio(useRatioForScale, if (useRatioForScale) 1.0 else 0.8)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.VAR_SEN.ordinal]) secondGraphData.addVarSens(useVarSensForScale, if (useVarSensForScale) 1.0 else 0.8)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.FIN_ISF.ordinal] && masterAutoIsf) secondGraphData.addFinalIsf(useFINAL_ISFForScale,  1.0, useCommonISFForScale, maxAutoIsfFactor)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.ACC_ISF.ordinal] && masterAutoIsf) secondGraphData.addAcceIsf(useACCE_ISFForScale, 1.0, useCommonISFForScale,maxAutoIsfFactor)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.BG_ISF.ordinal] && masterAutoIsf) secondGraphData.addBgIsf(useBG_ISFForScale, 1.0, useCommonISFForScale, maxAutoIsfFactor)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.PP_ISF.ordinal] && masterAutoIsf) secondGraphData.addPpIsf(usePP_ISFForScale, 1.0, useCommonISFForScale, maxAutoIsfFactor)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.DUR_ISF.ordinal] && masterAutoIsf) secondGraphData.addDuraIsf(useDURA_ISFForScale, 1.0, useCommonISFForScale, maxAutoIsfFactor)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.DEVSLOPE.ordinal] && config.isDev()) secondGraphData.addDeviationSlope(useDSForScale,if (useDSForScale) 1.0 else 0.8, useRatioForScale)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.HR.ordinal]) secondGraphData.addHeartRate(useHRForScale, if (useHRForScale) 1.0 else 0.8)
+            //if (menuChartSettings[g + 1][OverviewMenus.CharType.STEPS.ordinal]) secondGraphData.addSteps(useSTEPSForScale, if (useSTEPSForScale) 1.0 else 0.8)
 
             // set manual x bounds to have nice steps
             secondGraphData.formatAxis(overviewData.fromTime, overviewData.endTime)
@@ -1158,16 +1275,38 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
         for (g in 0 until min(secondaryGraphs.size, menuChartSettings.size - 1)) {
             secondaryGraphsLabel[g].text = overviewMenus.enabledTypes(g + 1)
             secondaryGraphs[g].visibility = (
-                menuChartSettings[g + 1][OverviewMenus.CharType.ABS.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.IOB.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.COB.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.SEN.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.VAR_SEN.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.DEVSLOPE.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.HR.ordinal] ||
-                    menuChartSettings[g + 1][OverviewMenus.CharType.STEPS.ordinal]
+                overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ABS.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.COB.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.IOB_TH.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DEV.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BGI.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.SEN.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.VAR_SEN.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DEVSLOPE.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.HR.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.STEPS.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.FIN_ISF.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.ACC_ISF.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.BG_ISF.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.PP_ISF.ordinal) ||
+                    overviewMenus.isActiveCharTypeData(g+1,OverviewMenus.CharType.DUR_ISF.ordinal)
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.ABS.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.IOB.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.COB.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.IOB_TH.ordinal] && masterAutoIsf ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.DEV.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.BGI.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.SEN.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.VAR_SEN.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.DEVSLOPE.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.HR.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.STEPS.ordinal] ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.FIN_ISF.ordinal] && masterAutoIsf ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.ACC_ISF.ordinal] && masterAutoIsf ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.BG_ISF.ordinal] && masterAutoIsf ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.PP_ISF.ordinal] && masterAutoIsf ||
+                    //menuChartSettings[g + 1][OverviewMenus.CharType.DUR_ISF.ordinal] && masterAutoIsf
                 ).toVisibility()
             secondaryGraphsData[g].performUpdate()
         }
@@ -1220,6 +1359,11 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             else 0.0
         val ratioUsed = request?.autosensResult?.ratio ?: 1.0
 
+        // mod mg/dl without floating point
+        var formatVariableSense = "%1$.0f→%2$.0f"
+        if (profileFunction.getUnits() == GlucoseUnit.MMOL)
+            formatVariableSense = "%1$.1f→%2$.1f"
+        // end mod
         if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
             val okDialogText: ArrayList<String> = ArrayList()
             val overViewText: ArrayList<String> = ArrayList()
@@ -1233,7 +1377,7 @@ class OverviewFragment : DaggerFragment(), View.OnClickListener, OnLongClickList
             }
             overViewText.add(
                 String.format(
-                    Locale.getDefault(), "%1$.1f→%2$.1f",
+                    Locale.getDefault(), formatVariableSense, //"%1$.1f→%2$.1f",
                     profileUtil.fromMgdlToUnits(isfMgdl, profileFunction.getUnits()),
                     profileUtil.fromMgdlToUnits(variableSens, profileFunction.getUnits())
                 )

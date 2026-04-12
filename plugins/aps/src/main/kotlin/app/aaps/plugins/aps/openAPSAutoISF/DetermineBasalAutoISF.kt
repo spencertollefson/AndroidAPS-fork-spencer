@@ -1,6 +1,6 @@
 package app.aaps.plugins.aps.openAPSAutoISF
 
-import app.aaps.core.data.configuration.Constants
+import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.AutosensResult
 import app.aaps.core.interfaces.aps.CurrentTemp
@@ -10,7 +10,11 @@ import app.aaps.core.interfaces.aps.MealData
 import app.aaps.core.interfaces.aps.OapsProfileAutoIsf
 import app.aaps.core.interfaces.aps.Predictions
 import app.aaps.core.interfaces.aps.RT
+import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
+import app.aaps.core.keys.BooleanKey
+import app.aaps.core.keys.DoubleKey
+import app.aaps.core.keys.interfaces.Preferences
 import java.text.DecimalFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -23,8 +27,11 @@ import kotlin.math.roundToInt
 
 @Singleton
 class DetermineBasalAutoISF @Inject constructor(
-    private val profileUtil: ProfileUtil
+    private val profileUtil: ProfileUtil,
+    private val profileFunction: ProfileFunction
 ) {
+
+    @Inject lateinit var preferences: Preferences
 
     private val consoleError = mutableListOf<String>()
     private val consoleLog = mutableListOf<String>()
@@ -105,6 +112,26 @@ class DetermineBasalAutoISF @Inject constructor(
         consoleError.add(msg)
     }
 
+    // mod ketoacidosis protection
+    private fun ketoProtection(_proposedRate: Double, profile: OapsProfileAutoIsf, rT: RT): Double {
+        var proposedRate : Double = _proposedRate
+        val protectionRate : Double = profile.ketoacidosis_protection_basal.toDouble() * 0.01
+        val cutOff : Double = round_basal(profile.current_basal * protectionRate)
+        if (profile.ketoacidosis_protection && proposedRate < cutOff) {
+            if (profile.ketoacidosis_protection_var_strategy && profile.ketoacidosis_protection_iob < (0 - profile.current_basal) ) {
+                proposedRate = cutOff
+                rT.reason.append("\nKetoacidosis protection sets temp basal to " + round(proposedRate,2) +" U/h.")
+                consoleError.add("Ketoacidosis protection sets temp basal to " + round(proposedRate,2) + "fsteps U/h")
+            } else if (!profile.ketoacidosis_protection_var_strategy) {
+                proposedRate = cutOff
+                rT.reason.append("\nKetoacidosis protection sets temp basal to " + round(proposedRate,2) + " U/h")
+                consoleError.add("Ketoacidosis protection sets temp basal to  " + round(proposedRate,2) + " U/h")
+            }
+        }
+        return proposedRate
+    }
+
+
     private fun getMaxSafeBasal(profile: OapsProfileAutoIsf): Double =
         min(profile.max_basal, min(profile.max_daily_safety_multiplier * profile.max_daily_basal, profile.current_basal_safety_multiplier * profile.current_basal))
 
@@ -141,21 +168,23 @@ class DetermineBasalAutoISF @Inject constructor(
             }
         } else {
             rT.duration = duration
-            rT.rate = suggestedRate
+            rT.rate = ketoProtection(suggestedRate, profile, rT)
             return rT
         }
     }
 
+
     fun determine_basal(
         glucose_status: GlucoseStatus, currenttemp: CurrentTemp, iob_data_array: Array<IobTotal>, profile: OapsProfileAutoIsf, autosens_data: AutosensResult, meal_data: MealData,
         microBolusAllowed: Boolean, currentTime: Long, flatBGsDetected: Boolean, autoIsfMode: Boolean, loop_wanted_smb: String, profile_percentage: Int, smb_ratio: Double,
-        smb_max_range_extension: Double, iob_threshold_percent: Int, auto_isf_consoleError: MutableList<String>, auto_isf_consoleLog: MutableList<String>
+        smb_max_range_extension: Double, iob_threshold_percent: Int, activity_consoleLog: String, auto_isf_consoleError: MutableList<String>, auto_isf_consoleLog: MutableList<String>
     ): RT {
         consoleError.clear()
+        consoleError.add(activity_consoleLog)
         consoleLog.clear()
         var rT = RT(
             algorithm = APSResult.Algorithm.AUTO_ISF,
-            runningDynamicIsf = autoIsfMode,
+            runningAutoIsf = true,
             timestamp = currentTime,
             consoleLog = consoleLog,
             consoleError = consoleError
@@ -200,7 +229,7 @@ class DetermineBasalAutoISF @Inject constructor(
                 rT.reason.append(". Shortening " + currenttemp.duration + "m long zero temp to 30m. ")
                 rT.deliverAt = deliverAt
                 rT.duration = 30
-                rT.rate = 0.0
+                rT.rate = ketoProtection(0.0, profile, rT)
                 return rT
             } else { //do nothing.
                 rT.reason.append(". Temp ${currenttemp.rate} <= current basal ${round(basal, 2)}U/hr; doing nothing. ")
@@ -216,44 +245,51 @@ class DetermineBasalAutoISF @Inject constructor(
         var min_bg = profile.min_bg
         var max_bg = profile.max_bg
 
+        val activityRatio = preferences.get(DoubleKey.ActivityMonitorRatio)    // activityMonitor(profile, bg, target_bg)
+        val stepActivityDetected = preferences.get(BooleanKey.ActivityMonitorStepsActive)
+        val stepInactivityDetected = preferences.get(BooleanKey.ActivityMonitorStepsInactive)
         var sensitivityRatio = 1.0
+        val normalTarget = 100 // evaluate high/low temptarget against 100, not scheduled target (which might change)
+        val exerciseModeActive = (profile.exercise_mode || profile.high_temptarget_raises_sensitivity) && profile.temptargetSet && target_bg > normalTarget
+        val resistanceModeActive = profile.low_temptarget_lowers_sensitivity && profile.temptargetSet && target_bg < normalTarget
         // var origin_sens = ""
         var exercise_ratio = 1.0
         val high_temptarget_raises_sensitivity = profile.exercise_mode || profile.high_temptarget_raises_sensitivity
-        val normalTarget = Constants.NORMAL_TARGET_MGDL // evaluate high/low temptarget against normal target, not scheduled target (which might change)
         // when temptarget is 160 mg/dL, run 50% basal (120 = 75%; 140 = 60%),  80 mg/dL with low_temptarget_lowers_sensitivity would give 1.5x basal, but is limited to autosens_max (1.2x by default)
-        val halfBasalTarget = profile.half_basal_exercise_target
-
-        if (high_temptarget_raises_sensitivity && profile.temptargetSet && target_bg > normalTarget
-            || profile.low_temptarget_lowers_sensitivity && profile.temptargetSet && target_bg < normalTarget
-        ) {
-            // w/ target 100, temp target 110 = .89, 120 = 0.8, 140 = 0.67, 160 = .57, and 200 = .44
-            // e.g.: Sensitivity ratio set to 0.8 based on temp target of 120; Adjusting basal from 1.65 to 1.35; ISF from 58.9 to 73.6
-            //sensitivityRatio = 2/(2+(target_bg-normalTarget)/40);
-            val c = (halfBasalTarget - normalTarget).toDouble()
-            if (c * (c + target_bg - normalTarget) <= 0.0) {
-                sensitivityRatio = profile.autosens_max
-            } else {
-                sensitivityRatio = c / (c + target_bg - normalTarget)
-                // limit sensitivityRatio to profile.autosens_max (1.2x by default)
-                sensitivityRatio = min(sensitivityRatio, profile.autosens_max)
-                sensitivityRatio = round(sensitivityRatio, 2)
-                exercise_ratio = sensitivityRatio
-                // origin_sens = "from TT modifier"
+        val mgdlHalfBasalTarget = profile.half_basal_exercise_target * if (profile.out_units == "mmol/L") GlucoseUnit.MMOLL_TO_MGDL else 1.0
+        if ( exerciseModeActive || resistanceModeActive || stepActivityDetected || stepInactivityDetected ) {
+            if ( exerciseModeActive || resistanceModeActive ) {
+                // w/ target 100, temp target 110 = .89, 120 = 0.8, 140 = 0.67, 160 = .57, and 200 = .44
+                // e.g.: Sensitivity ratio set to 0.8 based on temp target of 120; Adjusting basal from 1.65 to 1.35; ISF from 58.9 to 73.6
+                val resistanceMax = min(1.5, profile.autosens_max)  // additional safety limit
+                val c = (mgdlHalfBasalTarget - normalTarget).toDouble()
+                if (c * (c + target_bg - normalTarget) <= 0.0) {
+                    sensitivityRatio = resistanceMax
+                } else {
+                    sensitivityRatio = c / (c + target_bg - normalTarget)
+                    // limit sensitivityRatio to profile.autosens_max (1.2x by default)
+                    sensitivityRatio = min(sensitivityRatio, resistanceMax)
+                    sensitivityRatio = round(sensitivityRatio, 2)
+                }
                 consoleError.add("Sensitivity ratio set to $sensitivityRatio based on temp target of $target_bg; ")
+            } else if ( stepActivityDetected ) {
+                sensitivityRatio = activityRatio
+            } else if ( stepInactivityDetected ) {
+                sensitivityRatio = activityRatio
             }
         } else {
+            consoleError.add("Sensitivity ratio unchanged: 1.0")
             sensitivityRatio = autosens_data.ratio
             consoleError.add("Autosens ratio: $sensitivityRatio; ")
         }
         var iobTH_reduction_ratio = 1.0
         if (iob_threshold_percent != 100) {
-            iobTH_reduction_ratio = profile_percentage / 100.0 * exercise_ratio     // later: * activityRatio;
+            iobTH_reduction_ratio = profile_percentage / 100.0 * sensitivityRatio   //exercise_ratio * activityRatio
         }
         basal = profile.current_basal * sensitivityRatio
         basal = round_basal(basal)
         if (basal != profile_current_basal)
-            consoleError.add("Adjusting basal from $profile_current_basal to $basal;")
+            consoleError.add("adjusting basal from $profile_current_basal to $basal;")
         else
             consoleError.add("Basal unchanged: $basal;")
 
@@ -388,20 +424,12 @@ class DetermineBasalAutoISF @Inject constructor(
         val expectedDelta = calculate_expected_delta(target_bg, eventualBG, bgi)
 
         // min_bg of 90 -> threshold of 65, 100 -> 70 110 -> 75, and 130 -> 85
-        var threshold = min_bg - 0.5 * (min_bg - 40)
-        // if (profile.lgsThreshold != null) {
-        //     val lgsThreshold = profile.lgsThreshold ?: error("lgsThreshold missing")
-        //     if (lgsThreshold > threshold) {
-        //         consoleError.add("Threshold set from ${convert_bg(threshold)} to ${convert_bg(lgsThreshold.toDouble())}; ")
-        //         threshold = lgsThreshold.toDouble()
-        //     }
-        // }
-
+        val threshold = min_bg - 0.5 * (min_bg - 40)
         //console.error(reservoir_data);
 
         rT = RT(
             algorithm = APSResult.Algorithm.AUTO_ISF,
-            runningDynamicIsf = autoIsfMode,
+            runningAutoIsf = true,
             timestamp = currentTime,
             bg = bg,
             tick = tick,
@@ -847,6 +875,15 @@ class DetermineBasalAutoISF @Inject constructor(
             enableSMB = false
         }
 
+        // mod no smb if bg < threshold
+        val mgdlSmbThreshold = profile.thresholdSMB * if (profileFunction.getUnits() == GlucoseUnit.MMOL) GlucoseUnit.MMOLL_TO_MGDL else 1.0
+        if (enableSMB && bg < mgdlSmbThreshold) {
+            consoleError.add("BG < ${convert_bg(profile.thresholdSMB)} - disabling SMB")
+            rT.reason.append("BG < ${convert_bg(profile.thresholdSMB)} - disabling SMB")
+            enableSMB = false
+        }
+        // end mod
+
         consoleError.add("BG projected to remain above ${convert_bg(min_bg)} for $minutesAboveMinBG minutes")
         if (minutesAboveThreshold < 240 || minutesAboveMinBG < 60) {
             consoleError.add("BG projected to remain above ${convert_bg(threshold)} for $minutesAboveThreshold minutes")
@@ -1119,7 +1156,7 @@ class DetermineBasalAutoISF @Inject constructor(
 
                 // if no zero temp is required, don't return yet; allow later code to set a high temp
                 if (durationReq > 0) {
-                    rT.rate = smbLowTempReq
+                    rT.rate = ketoProtection(smbLowTempReq, profile, rT)
                     rT.duration = durationReq
                     return rT
                 }

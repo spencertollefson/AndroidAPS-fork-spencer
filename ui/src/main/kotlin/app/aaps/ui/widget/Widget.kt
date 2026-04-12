@@ -183,7 +183,9 @@ class Widget : AppWidgetProvider() {
         if (!lastBgData.isActualBg()) views.setInt(R.id.bg, "setPaintFlags", Paint.STRIKE_THRU_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG)
         else views.setInt(R.id.bg, "setPaintFlags", Paint.ANTI_ALIAS_FLAG)
 
-        views.setTextViewText(R.id.time_ago, dateUtil.minOrSecAgo(rh, lastBgData.lastBg()?.timestamp))
+        // mod don't show annoying seconds
+        // views.setTextViewText(R.id.time_ago, dateUtil.minOrSecAgo(rh, lastBgData.lastBg()?.timestamp))
+        views.setTextViewText(R.id.time_ago, dateUtil.minAgo(rh, lastBgData.lastBg()?.timestamp))
         //views.setTextViewText(R.id.time_ago_short, "(" + dateUtil.minAgoShort(overviewData.lastBg?.timestamp) + ")")
     }
 
@@ -234,7 +236,7 @@ class Widget : AppWidgetProvider() {
             views.setTextColor(R.id.temp_target, rh.gc(app.aaps.core.ui.R.color.widget_ribbonWarning))
             views.setTextViewText(
                 R.id.temp_target,
-                profileUtil.toTargetRangeString(tempTarget.lowTarget, tempTarget.highTarget, GlucoseUnit.MGDL, units) + " " + dateUtil.untilString(tempTarget.end, rh)
+                profileUtil.toTargetRangeString(tempTarget.lowTarget, tempTarget.highTarget, GlucoseUnit.MGDL, units) + " " + dateUtil.untilString(tempTarget.end, rh).replace("h ","h")
             )
         } else {
             // If the target is not the same as set in the profile then oref has overridden it
@@ -273,7 +275,7 @@ class Widget : AppWidgetProvider() {
                 }
             } ?: rh.gc(app.aaps.core.ui.R.color.widget_ribbonCritical)
 
-        views.setTextViewText(R.id.active_profile, profileFunction.getProfileNameWithRemainingTime())
+        views.setTextViewText(R.id.active_profile, profileFunction.getProfileNameWithRemainingTime().replace("h ","").replace("%)(","%|").replace("(", " ("))
         // this is crashing, use background as text for now
         //views.setInt(R.id.active_profile, "setBackgroundColor", profileBackgroundColor)
         //views.setTextColor(R.id.active_profile, profileTextColor)
@@ -319,18 +321,26 @@ class Widget : AppWidgetProvider() {
             else if (config.AAPSCLIENT) processedDeviceStatusData.getAPSResult()?.variableSens ?: 0.0
             else 0.0
         val ratioUsed = request?.autosensResult?.ratio ?: 1.0
+        // mod variable sense mg/dl without floating point
+        var formatVariableSense = "%1$.0f→%2$.0f"
+        if (profileFunction.getUnits() == GlucoseUnit.MMOL)
+            formatVariableSense = "%1$.1f→%2$.1f"
+        // end mod
         if (variableSens != isfMgdl && variableSens != 0.0 && isfMgdl != null) {
             val overViewText: ArrayList<String> = ArrayList()
-            if (ratioUsed != 1.0 && ratioUsed != lastAutosensData?.autosensResult?.ratio) overViewText.add(rh.gs(app.aaps.core.ui.R.string.algorithm_short, ratioUsed * 100))
+            //if (ratioUsed != 1.0 && ratioUsed != lastAutosensData?.autosensResult?.ratio) overViewText.add(rh.gs(app.aaps.core.ui.R.string.algorithm_short,ratioUsed * 100))
             overViewText.add(
                 String.format(
-                    Locale.getDefault(), "%1$.1f→%2$.1f",
+                    Locale.getDefault(), formatVariableSense, //"%1$.1f→%2$.1f",
                     profileUtil.fromMgdlToUnits(isfMgdl, profileFunction.getUnits()),
                     profileUtil.fromMgdlToUnits(variableSens, profileFunction.getUnits())
                 )
             )
             views.setTextViewText(R.id.variable_sensitivity, overViewText.joinToString("\n"))
             views.setViewVisibility(R.id.variable_sensitivity, View.VISIBLE)
-        } else views.setViewVisibility(R.id.variable_sensitivity, View.GONE)
+        } else {
+            views.setViewVisibility(R.id.variable_sensitivity, View.GONE)
+            views.setViewVisibility(R.id.sensitivity, View.VISIBLE)
+        }
     }
 }

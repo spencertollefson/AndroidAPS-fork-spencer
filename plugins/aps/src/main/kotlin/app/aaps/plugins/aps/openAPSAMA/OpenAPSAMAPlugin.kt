@@ -2,6 +2,8 @@ package app.aaps.plugins.aps.openAPSAMA
 
 import android.content.Context
 import android.content.Intent
+import android.icu.util.Calendar
+import android.net.Uri
 import androidx.core.net.toUri
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceManager
@@ -40,6 +42,8 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntentKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.LongKey
+//import app.aaps.core.objects.aps.DetermineBasalResult
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.convertedToAbsolute
 import app.aaps.core.objects.extensions.getPassedDurationToTimeInMinutes
@@ -53,6 +57,7 @@ import app.aaps.plugins.aps.OpenAPSFragment
 import app.aaps.plugins.aps.R
 import app.aaps.plugins.aps.events.EventOpenAPSUpdateGui
 import app.aaps.plugins.aps.events.EventResetOpenAPSGui
+import dagger.android.HasAndroidInjector
 import app.aaps.plugins.aps.openAPSSMB.GlucoseStatusCalculatorSMB
 import org.json.JSONObject
 import javax.inject.Inject
@@ -185,6 +190,9 @@ class OpenAPSAMAPlugin @Inject constructor(
 
         val iobArray = iobCobCalculator.calculateIobArrayInDia(profile)
         val mealData = iobCobCalculator.getMealDataWithWaitingForCalculationFinish()
+        val calendar = Calendar.getInstance()
+        val lastAppStart = preferences.get(LongKey.AppStart)
+        val elapsedTimeSinceLastStart = (dateUtil.now() - lastAppStart) / 60000
 
         val oapsProfile = OapsProfile(
             dia = min(profile.dia, 3.0),
@@ -207,29 +215,43 @@ class OpenAPSAMAPlugin @Inject constructor(
             resistance_lowers_target = false, // not used
             adv_target_adjustments = false, // not used
             exercise_mode = false, // not used
-            half_basal_exercise_target = 0, // not used
+            half_basal_exercise_target = 160.0, // not used
+            activity_detection = false, // not used
+            recent_steps_5_minutes = 0, // not used
+            recent_steps_10_minutes = 0, // not used
+            recent_steps_15_minutes = 0, // not used
+            recent_steps_30_minutes = 0, // not used
+            recent_steps_60_minutes = 0, // not used
+            phone_moved = false, // not used
+            time_since_start = 0, // not used
+            now = 0, // not used
             maxCOB = 0, // not used
             skip_neutral_temps = pump.setNeutralTempAtFullHour(),
             remainingCarbsCap = 0, // not used
             enableUAM = false, // not used
             A52_risk_enable = SMBDefaults.A52_risk_enable,
             SMBInterval = 0, // not used
-            enableSMB_with_COB = false, // not used
-            enableSMB_with_temptarget = false, // not used
-            allowSMB_with_high_temptarget = false, // not used
+            thresholdSMB = 100.0, // not used
+            enableSMB_with_temptarget = false,
+            allowSMB_with_high_temptarget = false,
             enableSMB_always = false, // not used
-            enableSMB_after_carbs = false, // not used
+            enableSMB_after_carbs = false,
             maxSMBBasalMinutes = 0, // not used
             maxUAMSMBBasalMinutes = 0, // not used
-            bolus_increment = pump.pumpDescription.bolusStep, // not used
-            carbsReqThreshold = 0, // not used
+            bolus_increment = pump.pumpDescription.bolusStep,
+            carbsReqThreshold = 0,
             current_basal = activePlugin.activePump.baseBasalRate,
             temptargetSet = isTempTarget,
-            autosens_max = preferences.get(DoubleKey.AutosensMax), // not used
+            autosens_max = preferences.get(DoubleKey.AutosensMax),
             out_units = if (profileFunction.getUnits() == GlucoseUnit.MMOL) "mmol/L" else "mg/dl",
-            variable_sens = 0.0, // not used
-            insulinDivisor = 0, // not used
-            TDD = 0.0 // not used
+            variable_sens = 0.0,
+            insulinDivisor = 0,
+            TDD = 0.0,
+            ketoacidosis_protection = false, // not used
+            ketoacidosis_protection_var_strategy = false, // not used
+            ketoacidosis_protection_basal = 20, // not used
+            ketoacidosis_protection_iob = 0.0,
+            enableSMB_with_COB = false // not used
         )
 
         aapsLogger.debug(LTag.APS, ">>> Invoking determine_basal AMA <<<")

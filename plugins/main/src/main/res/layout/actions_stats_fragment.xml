@@ -30,7 +30,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/age_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone"/>
 
         <TextView
             android:id="@+id/sensor_age"
@@ -49,7 +50,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/level_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/sensor_level"
@@ -103,7 +105,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/age_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/insulin_age"
@@ -122,7 +125,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/level_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/reservoir_level"
@@ -177,7 +181,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/age_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/cannula_age"
@@ -196,7 +201,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/cannula_usage"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/cannula_usage"
@@ -252,7 +258,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/age_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/pb_age"
@@ -271,7 +278,8 @@
             android:paddingStart="0dp"
             android:paddingEnd="0dp"
             android:text="@string/level_label"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/pb_level"

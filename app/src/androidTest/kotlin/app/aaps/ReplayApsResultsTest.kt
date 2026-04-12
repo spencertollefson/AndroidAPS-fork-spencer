@@ -1,5 +1,6 @@
 package app.aaps
 
+import android.icu.util.Calendar
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -17,10 +18,13 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.maintenance.FileListProvider
 import app.aaps.core.interfaces.storage.Storage
 import app.aaps.core.interfaces.utils.DateUtil
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
+import app.aaps.core.keys.LongKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.utils.JsonHelper
 import app.aaps.di.TestApplication
 import app.aaps.plugins.aps.openAPSAMA.DetermineBasalAMA
@@ -30,6 +34,8 @@ import app.aaps.plugins.aps.openAPSAutoISF.DetermineBasalAutoISF
 import app.aaps.plugins.aps.openAPSSMB.DetermineBasalAdapterSMBJS
 import app.aaps.plugins.aps.openAPSSMB.DetermineBasalSMB
 import app.aaps.plugins.aps.openAPSSMB.OpenAPSSMBPlugin
+import app.aaps.plugins.aps.openAPSSMB.PhoneMovementDetector
+import app.aaps.plugins.aps.openAPSSMB.StepService
 import app.aaps.plugins.aps.openAPSSMBAutoISF.DetermineBasalAdapterAutoISFJS
 import app.aaps.plugins.aps.openAPSSMBDynamicISF.DetermineBasalAdapterSMBDynamicISFJS
 import app.aaps.plugins.aps.utils.ScriptReader
@@ -179,6 +185,9 @@ class ReplayApsResultsTest @Inject constructor() {
         for (i in 0 until determineBasalResult.iobData!!.length())
             iobData.add(determineBasalResult.iobData!!.getJSONObject(i).toIob())
         val currentTime = determineBasalResult.currentTime
+        val calendar = Calendar.getInstance()
+        val lastAppStart = preferences.get(LongKey.AppStart)
+        val elapsedTimeSinceLastStart = (dateUtil.now() - lastAppStart) / 60000
         val profile = OapsProfile(
             dia = 0.0,
             min_5m_carbimpact = 0.0,
@@ -193,21 +202,29 @@ class ReplayApsResultsTest @Inject constructor() {
             autosens_adjust_targets = false,
             max_daily_safety_multiplier = determineBasalResult.profile.getDouble("max_daily_safety_multiplier"),
             current_basal_safety_multiplier = determineBasalResult.profile.getDouble("current_basal_safety_multiplier"),
-            lgsThreshold = null,
             high_temptarget_raises_sensitivity = determineBasalResult.profile.getBoolean("high_temptarget_raises_sensitivity"),
             low_temptarget_lowers_sensitivity = determineBasalResult.profile.getBoolean("low_temptarget_lowers_sensitivity"),
             sensitivity_raises_target = determineBasalResult.profile.getBoolean("sensitivity_raises_target"),
             resistance_lowers_target = determineBasalResult.profile.getBoolean("resistance_lowers_target"),
             adv_target_adjustments = determineBasalResult.profile.getBoolean("adv_target_adjustments"),
             exercise_mode = determineBasalResult.profile.getBoolean("exercise_mode"),
-            half_basal_exercise_target = determineBasalResult.profile.getInt("half_basal_exercise_target"),
+            half_basal_exercise_target = determineBasalResult.profile.getDouble("half_basal_exercise_target"),
+            activity_detection = false,
+            recent_steps_5_minutes = StepService.getRecentStepCount5Min(),
+            recent_steps_10_minutes = StepService.getRecentStepCount10Min(),
+            recent_steps_15_minutes = StepService.getRecentStepCount15Min(),
+            recent_steps_30_minutes = StepService.getRecentStepCount30Min(),
+            recent_steps_60_minutes = StepService.getRecentStepCount60Min(),
+            phone_moved = PhoneMovementDetector.phoneMoved(),
+            time_since_start = 0,
+            now = 0,
             maxCOB = determineBasalResult.profile.getInt("maxCOB"),
             skip_neutral_temps = determineBasalResult.profile.getBoolean("skip_neutral_temps"),
             remainingCarbsCap = determineBasalResult.profile.getInt("remainingCarbsCap"),
             enableUAM = determineBasalResult.profile.getBoolean("enableUAM"),
             A52_risk_enable = determineBasalResult.profile.getBoolean("A52_risk_enable"),
             SMBInterval = determineBasalResult.profile.getInt("SMBInterval"),
-            enableSMB_with_COB = determineBasalResult.profile.getBoolean("enableSMB_with_COB"),
+            thresholdSMB = 100.0,
             enableSMB_with_temptarget = determineBasalResult.profile.getBoolean("enableSMB_with_temptarget"),
             allowSMB_with_high_temptarget = determineBasalResult.profile.getBoolean("allowSMB_with_high_temptarget"),
             enableSMB_always = determineBasalResult.profile.getBoolean("enableSMB_always"),
@@ -220,9 +237,15 @@ class ReplayApsResultsTest @Inject constructor() {
             temptargetSet = determineBasalResult.profile.getBoolean("temptargetSet"),
             autosens_max = determineBasalResult.profile.getDouble("autosens_max"),
             out_units = determineBasalResult.profile.optString("out_units"),
+            lgsThreshold = null,
             variable_sens = 0.0,
             insulinDivisor = 0,
-            TDD = 0.0
+            TDD = 0.0,
+            ketoacidosis_protection = preferences.get(BooleanKey.ApsKetoacidosisProtection),
+            ketoacidosis_protection_var_strategy = preferences.get(BooleanKey.ApsKetoacidosisVarStrategy),
+            ketoacidosis_protection_basal = preferences.get(IntKey.ApsKetoacidosisProtectionBasal),
+            ketoacidosis_protection_iob = 0.0,
+            enableSMB_with_COB = determineBasalResult.profile.getBoolean("enableSMB_with_COB")
         )
         val meatData = MealData(
             carbs = determineBasalResult.mealData.getDouble("carbs"),
@@ -343,6 +366,9 @@ class ReplayApsResultsTest @Inject constructor() {
         for (i in 0 until determineBasalResult.iobData!!.length())
             iobData.add(determineBasalResult.iobData!!.getJSONObject(i).toIob())
         val currentTime = determineBasalResult.currentTime
+        val calendar = Calendar.getInstance()
+        val lastAppStart = preferences.get(LongKey.AppStart)
+        val elapsedTimeSinceLastStart = (dateUtil.now() - lastAppStart) / 60000
         val profile = OapsProfile(
             dia = 0.0,
             min_5m_carbimpact = 0.0,
@@ -357,21 +383,29 @@ class ReplayApsResultsTest @Inject constructor() {
             autosens_adjust_targets = false,
             max_daily_safety_multiplier = determineBasalResult.profile.getDouble("max_daily_safety_multiplier"),
             current_basal_safety_multiplier = determineBasalResult.profile.getDouble("current_basal_safety_multiplier"),
-            lgsThreshold = determineBasalResult.profile.getInt("lgsThreshold"),
             high_temptarget_raises_sensitivity = determineBasalResult.profile.getBoolean("high_temptarget_raises_sensitivity"),
             low_temptarget_lowers_sensitivity = determineBasalResult.profile.getBoolean("low_temptarget_lowers_sensitivity"),
             sensitivity_raises_target = determineBasalResult.profile.getBoolean("sensitivity_raises_target"),
             resistance_lowers_target = determineBasalResult.profile.getBoolean("resistance_lowers_target"),
             adv_target_adjustments = determineBasalResult.profile.getBoolean("adv_target_adjustments"),
             exercise_mode = determineBasalResult.profile.getBoolean("exercise_mode"),
-            half_basal_exercise_target = determineBasalResult.profile.getInt("half_basal_exercise_target"),
+            half_basal_exercise_target = determineBasalResult.profile.getDouble("half_basal_exercise_target"),
+            activity_detection = false,
+            recent_steps_5_minutes = StepService.getRecentStepCount5Min(),
+            recent_steps_10_minutes = StepService.getRecentStepCount10Min(),
+            recent_steps_15_minutes = StepService.getRecentStepCount15Min(),
+            recent_steps_30_minutes = StepService.getRecentStepCount30Min(),
+            recent_steps_60_minutes = StepService.getRecentStepCount60Min(),
+            phone_moved = PhoneMovementDetector.phoneMoved(),
+            time_since_start = 0,
+            now = 0,
             maxCOB = determineBasalResult.profile.getInt("maxCOB"),
             skip_neutral_temps = determineBasalResult.profile.getBoolean("skip_neutral_temps"),
             remainingCarbsCap = determineBasalResult.profile.getInt("remainingCarbsCap"),
             enableUAM = determineBasalResult.profile.getBoolean("enableUAM"),
             A52_risk_enable = determineBasalResult.profile.getBoolean("A52_risk_enable"),
             SMBInterval = determineBasalResult.profile.getInt("SMBInterval"),
-            enableSMB_with_COB = determineBasalResult.profile.getBoolean("enableSMB_with_COB"),
+            thresholdSMB = 100.0,
             enableSMB_with_temptarget = determineBasalResult.profile.getBoolean("enableSMB_with_temptarget"),
             allowSMB_with_high_temptarget = determineBasalResult.profile.getBoolean("allowSMB_with_high_temptarget"),
             enableSMB_always = determineBasalResult.profile.getBoolean("enableSMB_always"),
@@ -384,9 +418,15 @@ class ReplayApsResultsTest @Inject constructor() {
             temptargetSet = determineBasalResult.profile.getBoolean("temptargetSet"),
             autosens_max = determineBasalResult.profile.getDouble("autosens_max"),
             out_units = determineBasalResult.profile.optString("out_units"),
+            lgsThreshold = determineBasalResult.profile.getInt("lgsThreshold"),
             variable_sens = determineBasalResult.profile.getDouble("variable_sens"),
             insulinDivisor = determineBasalResult.profile.getInt("insulinDivisor"),
-            TDD = determineBasalResult.profile.getDouble("TDD")
+            TDD = determineBasalResult.profile.getDouble("TDD"),
+            ketoacidosis_protection = preferences.get(BooleanKey.ApsKetoacidosisProtection),
+            ketoacidosis_protection_var_strategy = preferences.get(BooleanKey.ApsKetoacidosisVarStrategy),
+            ketoacidosis_protection_basal = preferences.get(IntKey.ApsKetoacidosisProtectionBasal),
+            ketoacidosis_protection_iob = 0.0,
+            enableSMB_with_COB = determineBasalResult.profile.getBoolean("enableSMB_with_COB")
         )
         val meatData = MealData(
             carbs = determineBasalResult.mealData.getDouble("carbs"),
@@ -501,6 +541,9 @@ class ReplayApsResultsTest @Inject constructor() {
         val iobData = arrayListOf<IobTotal>()
         for (i in 0 until determineBasalResult.iobData!!.length())
             iobData.add(determineBasalResult.iobData!!.getJSONObject(i).toIob())
+        val calendar = Calendar.getInstance()
+        val lastAppStart = preferences.get(LongKey.AppStart)
+        val elapsedTimeSinceLastStart = (dateUtil.now() - lastAppStart) / 60000
         val profile = OapsProfile(
             dia = determineBasalResult.profile.getDouble("dia"),
             min_5m_carbimpact = determineBasalResult.profile.getDouble("min_5m_carbimpact"),
@@ -515,21 +558,29 @@ class ReplayApsResultsTest @Inject constructor() {
             autosens_adjust_targets = determineBasalResult.profile.getBoolean("autosens_adjust_targets"),
             max_daily_safety_multiplier = determineBasalResult.profile.getDouble("max_daily_safety_multiplier"),
             current_basal_safety_multiplier = determineBasalResult.profile.getDouble("current_basal_safety_multiplier"),
-            lgsThreshold = 0,
             high_temptarget_raises_sensitivity = false,
             low_temptarget_lowers_sensitivity = false,
             sensitivity_raises_target = false,
             resistance_lowers_target = false,
             adv_target_adjustments = false,
             exercise_mode = false,
-            half_basal_exercise_target = 0,
+            half_basal_exercise_target = 160.0,
+            activity_detection = false,
+            recent_steps_5_minutes = StepService.getRecentStepCount5Min(),
+            recent_steps_10_minutes = StepService.getRecentStepCount10Min(),
+            recent_steps_15_minutes = StepService.getRecentStepCount15Min(),
+            recent_steps_30_minutes = StepService.getRecentStepCount30Min(),
+            recent_steps_60_minutes = StepService.getRecentStepCount60Min(),
+            phone_moved = PhoneMovementDetector.phoneMoved(),
+            time_since_start = 0,
+            now = 0,
             maxCOB = 0,
             skip_neutral_temps = determineBasalResult.profile.getBoolean("skip_neutral_temps"),
             remainingCarbsCap = 0,
             enableUAM = false,
             A52_risk_enable = false,
             SMBInterval = 0,
-            enableSMB_with_COB = false,
+            thresholdSMB = 100.0,
             enableSMB_with_temptarget = false,
             allowSMB_with_high_temptarget = false,
             enableSMB_always = false,
@@ -542,9 +593,15 @@ class ReplayApsResultsTest @Inject constructor() {
             temptargetSet = determineBasalResult.profile.getBoolean("temptargetSet"),
             autosens_max = 0.0,
             out_units = determineBasalResult.profile.optString("out_units"),
+            lgsThreshold = 0,
             variable_sens = 0.0,
             insulinDivisor = 0,
-            TDD = 0.0
+            TDD = 0.0,
+            ketoacidosis_protection = false,
+            ketoacidosis_protection_var_strategy = preferences.get(BooleanKey.ApsKetoacidosisVarStrategy),
+            ketoacidosis_protection_basal = 20,
+            ketoacidosis_protection_iob = 0.0,
+            enableSMB_with_COB = false
         )
         val mealData = MealData(
             carbs = determineBasalResult.mealData.getDouble("carbs"),
@@ -667,6 +724,9 @@ class ReplayApsResultsTest @Inject constructor() {
         for (i in 0 until determineBasalResult.iobData!!.length())
             iobData.add(determineBasalResult.iobData!!.getJSONObject(i).toIob())
         val currentTime = determineBasalResult.currentTime
+        val calendar = Calendar.getInstance()
+        val lastAppStart = preferences.get(LongKey.AppStart)
+        val elapsedTimeSinceLastStart = (dateUtil.now() - lastAppStart) / 60000
         val profile = OapsProfileAutoIsf(
             dia = 0.0,
             min_5m_carbimpact = 0.0,
@@ -681,26 +741,34 @@ class ReplayApsResultsTest @Inject constructor() {
             autosens_adjust_targets = false,
             max_daily_safety_multiplier = determineBasalResult.profile.getDouble("max_daily_safety_multiplier"),
             current_basal_safety_multiplier = determineBasalResult.profile.getDouble("current_basal_safety_multiplier"),
-            lgsThreshold = null,
             high_temptarget_raises_sensitivity = determineBasalResult.profile.getBoolean("high_temptarget_raises_sensitivity"),
             low_temptarget_lowers_sensitivity = determineBasalResult.profile.getBoolean("low_temptarget_lowers_sensitivity"),
             sensitivity_raises_target = determineBasalResult.profile.getBoolean("sensitivity_raises_target"),
             resistance_lowers_target = determineBasalResult.profile.getBoolean("resistance_lowers_target"),
             adv_target_adjustments = determineBasalResult.profile.getBoolean("adv_target_adjustments"),
             exercise_mode = determineBasalResult.profile.getBoolean("exercise_mode"),
-            half_basal_exercise_target = determineBasalResult.profile.getInt("half_basal_exercise_target"),
+            half_basal_exercise_target = determineBasalResult.profile.getDouble("half_basal_exercise_target"),
+            activity_detection = false,
+            recent_steps_5_minutes = StepService.getRecentStepCount5Min(),
+            recent_steps_10_minutes = StepService.getRecentStepCount10Min(),
+            recent_steps_15_minutes = StepService.getRecentStepCount15Min(),
+            recent_steps_30_minutes = StepService.getRecentStepCount30Min(),
+            recent_steps_60_minutes = StepService.getRecentStepCount60Min(),
+            phone_moved = PhoneMovementDetector.phoneMoved(),
+            time_since_start = 0,
+            now = 0,
             maxCOB = determineBasalResult.profile.getInt("maxCOB"),
             skip_neutral_temps = determineBasalResult.profile.getBoolean("skip_neutral_temps"),
             remainingCarbsCap = determineBasalResult.profile.getInt("remainingCarbsCap"),
             enableUAM = determineBasalResult.profile.getBoolean("enableUAM"),
             A52_risk_enable = determineBasalResult.profile.getBoolean("A52_risk_enable"),
             SMBInterval = determineBasalResult.profile.getInt("SMBInterval"),
-            enableSMB_with_COB = determineBasalResult.profile.getBoolean("enableSMB_with_COB"),
+            thresholdSMB = 100.0,
             enableSMB_with_temptarget = determineBasalResult.profile.getBoolean("enableSMB_with_temptarget"),
             allowSMB_with_high_temptarget = determineBasalResult.profile.getBoolean("allowSMB_with_high_temptarget"),
             enableSMB_always = determineBasalResult.profile.getBoolean("enableSMB_always"),
             enableSMB_after_carbs = determineBasalResult.profile.getBoolean("enableSMB_after_carbs"),
-            maxSMBBasalMinutes = determineBasalResult.profile.getInt("maxSMBBasalMinutes"),
+            maxSMBBasalMinutes = determineBasalResult.profile.getInt("maxSMBBasalMinutes"), // TODO only available in result.variableSens? , not in determineBasalResult.profile.getDouble("variable_sens"),
             maxUAMSMBBasalMinutes = determineBasalResult.profile.getInt("maxUAMSMBBasalMinutes"),
             bolus_increment = determineBasalResult.profile.getDouble("bolus_increment"),
             carbsReqThreshold = determineBasalResult.profile.getInt("carbsReqThreshold"),
@@ -708,7 +776,8 @@ class ReplayApsResultsTest @Inject constructor() {
             temptargetSet = determineBasalResult.profile.getBoolean("temptargetSet"),
             autosens_max = determineBasalResult.profile.getDouble("autosens_max"),
             out_units = determineBasalResult.profile.optString("out_units"),
-            variable_sens = varSens, // TODO only available in result.variableSens? , not in determineBasalResult.profile.getDouble("variable_sens"),
+            lgsThreshold = null,
+            variable_sens = varSens,
             autoISF_version = determineBasalResult.profile.optString("autoISF_version"),
             enable_autoISF = determineBasalResult.profile.getBoolean("enable_autoISF"),
             autoISF_max = determineBasalResult.profile.getDouble("autoISF_max"),
@@ -726,7 +795,12 @@ class ReplayApsResultsTest @Inject constructor() {
             smb_max_range_extension = determineBasalResult.profile.getDouble("smb_max_range_extension"),
             enableSMB_EvenOn_OddOff_always = determineBasalResult.profile.getBoolean("enableSMB_EvenOn_OddOff_always"),
             iob_threshold_percent = determineBasalResult.profile.getInt("iob_threshold_percent"),
-            profile_percentage = determineBasalResult.profile.getInt("profile_percentage")
+            profile_percentage = determineBasalResult.profile.getInt("profile_percentage"),
+            ketoacidosis_protection = preferences.get(BooleanKey.ApsKetoacidosisProtection),
+            ketoacidosis_protection_var_strategy = preferences.get(BooleanKey.ApsKetoacidosisVarStrategy),
+            ketoacidosis_protection_basal = preferences.get(IntKey.ApsKetoacidosisProtectionBasal),
+            ketoacidosis_protection_iob = 1.0,
+            enableSMB_with_COB = determineBasalResult.profile.getBoolean("enableSMB_with_COB")
         )
         val meatData = MealData(
             carbs = determineBasalResult.mealData.getDouble("carbs"),
@@ -752,6 +826,7 @@ class ReplayApsResultsTest @Inject constructor() {
             profile_percentage = profile.profile_percentage, // 100,
             smb_ratio = profile.smb_delivery_ratio, // 0.5,
             loop_wanted_smb = "dummy",
+            activity_consoleLog = "Activity Monitor ...",
             auto_isf_consoleLog = mutableListOf<String>("end AutoISF"),
             auto_isf_consoleError = mutableListOf<String>("start AutoISF")
         )

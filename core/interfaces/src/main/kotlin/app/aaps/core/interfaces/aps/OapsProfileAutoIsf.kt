@@ -23,13 +23,25 @@ data class OapsProfileAutoIsf(
     var resistance_lowers_target: Boolean,
     var adv_target_adjustments: Boolean,
     var exercise_mode: Boolean,
-    var half_basal_exercise_target: Int,
+    var half_basal_exercise_target: Double = 160.0,
+    // Activity monitor
+    val activity_detection: Boolean? = false,
+    val recent_steps_5_minutes: Int? = 0,
+    val recent_steps_10_minutes: Int? = 0,
+    val recent_steps_15_minutes: Int? = 0,
+    val recent_steps_30_minutes: Int? = 0,
+    val recent_steps_60_minutes: Int? = 0,
+    val phone_moved: Boolean? = false,
+    val time_since_start: Long? = 0,
+    val now: Int? = 0,
+    // Activity Monitor end
     var maxCOB: Int,
     var skip_neutral_temps: Boolean,
     var remainingCarbsCap: Int,
     var enableUAM: Boolean,
     var A52_risk_enable: Boolean,
     var SMBInterval: Int,
+    val thresholdSMB: Double = 100.0,
     var enableSMB_with_COB: Boolean,
     var enableSMB_with_temptarget: Boolean,
     var allowSMB_with_high_temptarget: Boolean,
@@ -63,5 +75,9 @@ data class OapsProfileAutoIsf(
     var smb_max_range_extension: Double,
     var enableSMB_EvenOn_OddOff_always: Boolean,
     var iob_threshold_percent: Int,
-    var profile_percentage: Int
+    var profile_percentage: Int,
+    var ketoacidosis_protection: Boolean,
+    val ketoacidosis_protection_var_strategy: Boolean = false,
+    var ketoacidosis_protection_basal: Int = 20,
+    val ketoacidosis_protection_iob: Double = 0.0
 )

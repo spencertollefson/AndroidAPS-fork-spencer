@@ -36,6 +36,7 @@ data class TT(
     enum class Reason(val text: String) {
         CUSTOM("Custom"),
         HYPOGLYCEMIA("Hypo"),
+        HYPOGLYCEMIAPLUS("Hypo-Plus"),
         ACTIVITY("Activity"),
         EATING_SOON("Eating Soon"),
         AUTOMATION("Automation"),
